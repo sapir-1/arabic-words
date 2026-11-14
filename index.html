@@ -416,6 +416,8 @@ let SEL=new Set(LESSONS.map(l=>l.k));
 try{const s=JSON.parse(localStorage.getItem(LS+'-sel')||'null');if(Array.isArray(s)){const f=s.filter(k=>LESSONS.some(l=>l.k===k));if(f.length)SEL=new Set(f)}}catch(e){}
 function saveSel(){try{localStorage.setItem(LS+'-sel',JSON.stringify([...SEL]))}catch(e){}}
 const pool=()=>WORDS.filter(w=>SEL.has(w.lesson));
+/* a word counts as learned once you answered it at least once (it then has an entry in P.boxes) */
+const learned=()=>pool().filter(w=>w.id in P.boxes);
 const smartPick=(list,n)=>list.map(w=>({w,k:box(w)+Math.random()*1.6})).sort((a,b)=>a.k-b.k).slice(0,n).map(x=>x.w);
 
 /* ===== Speech ===== */
@@ -526,7 +528,7 @@ function homeHTML(){
   </section>
   <section class="tips"><h2>שימו לב</h2><ul>${TIPS.map(t=>`<li>${arWrap(esc(t))}</li>`).join('')}</ul></section>
   <footer class="foot">
-    <div class="tot"><span>נקלטו ${mAll} מתוך ${all} מילים</span><span class="bar"><i style="width:${Math.round(mAll/all*100)}%"></i></span></div>
+    <div class="tot"><span>נקלטו ${mAll} מתוך ${all} מילים (למדת ${WORDS.filter(w=>w.id in P.boxes).length})</span><span class="bar"><i style="width:${Math.round(mAll/all*100)}%"></i></span></div>
     <p class="note">מילה נחשבת כנקלטה אחרי שלוש תשובות נכונות ברצף. טעות מחזירה אותה להתחלה. <button class="link" data-act="reset">איפוס ההתקדמות</button></p>
     ${syncHTML()}
   </footer>`;
@@ -570,9 +572,13 @@ function startQuiz(words,typeFn,label){
   go('quiz');
 }
 function quizSetupHTML(){
-  const n=Math.min(15,pool().length);
+  const n=learned().length,tot=pool().length;
+  if(!n) return `${titlebar('חידון')}
+  <p class="note" style="margin-top:0">עוד לא למדת מילים בשיעורים שנבחרו. התחילו בכרטיסיות או בחזרה חכמה, ומילים שתענו עליהן יצטרפו לחידון.</p>
+  <button class="btn" data-act="cards">לכרטיסיות</button>
+  <button class="btn alt" data-act="smart">חזרה חכמה</button>`;
   return `${titlebar('חידון')}
-  <p class="note" style="margin-top:0">${n} שאלות מתוך השיעורים שבחרתם. מה לשאול?</p>
+  <p class="note" style="margin-top:0">למדת ${n} מתוך ${tot} המילים בשיעורים שנבחרו. החידון כולל את כולן, ואחר כך חוזרים רק על מה שטעיתם בו. מה לשאול?</p>
   <div class="opts">
     <button class="opt" data-act="quiz-go" data-dir="ar"><span>מילה בערבית, בוחרים תרגום</span></button>
     <button class="opt" data-act="quiz-go" data-dir="he"><span>מילה בעברית, בוחרים בערבית</span></button>
@@ -617,11 +623,11 @@ function nextQ(){
 function resultsHTML(){
   const r=QS.res,good=r.filter(x=>x.ok).length,n=r.length;
   const miss=[...new Map(r.filter(x=>!x.ok).map(x=>[x.w.id,x.w])).values()];
-  const msg=good===n?'מושלם. כל התשובות נכונות.':good/n>=.7?'יפה מאוד. עוד קצת חזרה על המילים שלמטה.':'כדאי לעבור שוב על המילים שלמטה.';
+  const msg=good===n?'מושלם. כל התשובות נכונות.':(QS.label==='חידון'||QS.label==='תרגול טעויות')?`הסבב הסתיים. עכשיו חוזרים רק על ${miss.length} המילים שטעיתם בהן.`:good/n>=.7?'יפה מאוד. עוד קצת חזרה על המילים שלמטה.':'כדאי לעבור שוב על המילים שלמטה.';
   return `${titlebar(QS.label)}
   <div class="score"><div class="n">${good}/${n}</div><p>${msg}</p></div>
   ${miss.length?`<div class="miss"><h3>מילים לחזרה</h3>${miss.map(w=>`<div class="row" style="padding:6px 0">${AR(w.ar)}<span class="he">${esc(w.he)}</span><span class="end">${spk(w.ar,'mini')}</span></div>`).join('')}</div>
-  <button class="btn" data-act="retry-miss">תרגול המילים האלה</button>`:''}
+  <button class="btn" data-act="retry-miss">המשך: תרגול ${miss.length} הטעויות</button>`:''}
   <button class="btn ${miss.length?'alt':''}" data-act="smart">עוד סבב של חזרה חכמה</button>
   <button class="btn alt" data-act="stats">קצב התקדמות</button>
   <button class="btn alt" data-act="home">למסך הבית</button>`;
@@ -800,7 +806,7 @@ document.addEventListener('click',e=>{
     case 'hero-next':{const cur=heroId;const c=smartPick(pool().filter(w=>w.id!==cur),5);heroId=(c[Math.floor(Math.random()*c.length)]||pool()[0]).id;heroOpen=false;render();break}
     case 'smart':startQuiz(smartPick(pool(),10),w=>w.pl&&Math.random()<.3?'pl':randDir(),'חזרה חכמה');break;
     case 'quiz-setup':go('quizSetup');break;
-    case 'quiz-go':{QUIZ_DIR=el.dataset.dir;const ws=shuffle(pool().slice()).slice(0,15);startQuiz(ws,()=>QUIZ_DIR==='mix'?randDir():QUIZ_DIR,'חידון');break}
+    case 'quiz-go':{QUIZ_DIR=el.dataset.dir;const ws=shuffle(learned());if(!ws.length){go('quizSetup');break}startQuiz(ws,()=>QUIZ_DIR==='mix'?randDir():QUIZ_DIR,'חידון');break}
     case 'plural':{
       let ws=pool().filter(w=>w.pl);
       if(!ws.length){ws=WORDS.filter(w=>w.pl)}
